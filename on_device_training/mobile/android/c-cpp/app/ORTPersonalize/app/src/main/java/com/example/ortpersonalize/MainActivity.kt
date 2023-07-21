@@ -21,7 +21,7 @@ import com.example.ortpersonalize.databinding.ActivityMainBinding
 import java.nio.FloatBuffer
 import java.nio.IntBuffer
 import java.util.*
-
+import kotlinx.coroutines.*
 
 class MainActivity : AppCompatActivity() {
 
@@ -563,28 +563,40 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // copy file from asset to cache dir in the same dir structure.
+    // This function copies a file from the asset directory to the cache directory using the same directory structure.
+    // It operates in a chunk-wise manner, using chunks of 1024 bytes, to prevent Out of Memory errors when dealing with large files.
+    // The process is performed on an IO thread to avoid blocking the main thread.
+    // If the file already exists in the cache directory, the function simply returns its path.
+    // If any exception occurs during the process, it throws a RuntimeException.
+    // Function Parameters:
+    // - assetFileName: the name of the file in the asset directory
+    // - cacheFileName: the name for the copied file in the cache directory
     private fun copyAssetToCacheDir(assetFileName : String, cacheFileName : String): String {
         mkCacheDir(cacheFileName)
         val f = java.io.File("$cacheDir/$cacheFileName")
         if (!f.exists()) {
-            try {
-                val modelFile = assets.open(assetFileName)
-                val size: Int = modelFile.available()
-                val buffer = ByteArray(size)
-                modelFile.read(buffer)
-                modelFile.close()
-                val fos = java.io.FileOutputStream(f)
-                fos.write(buffer)
-                fos.close()
-            } catch (e: Exception) {
-                throw RuntimeException(e)
+            runBlocking {
+                launch(Dispatchers.IO) {
+                    try {
+                        val modelFile = assets.open(assetFileName)
+                        val fos = java.io.FileOutputStream(f)
+                        val buffer = ByteArray(1024) // size of the chunk
+                        var length = modelFile.read(buffer)
+                        while (length > 0) {
+                            fos.write(buffer, 0, length)
+                            length = modelFile.read(buffer)
+                        }
+                        modelFile.close()
+                        fos.close()
+                    } catch (e: Exception) {
+                        throw RuntimeException(e)
+                    }
+                }
             }
         }
-
-
         return f.path
     }
+
 
     private fun copyFileOrDir(path: String): String {
         val assetManager = assets
